@@ -1,0 +1,11 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+pydantic-settings==2.3.4
+pymupdf==1.24.9
+openai==1.40.0
+chromadb==0.5.3
+sqlalchemy==2.0.31
+pytest==8.3.2
+httpx==0.27.0
+pytest-asyncio==0.23.8

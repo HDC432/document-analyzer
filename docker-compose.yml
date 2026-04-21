@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data/chroma:/data/chroma
+      - ./data/sqlite:/data/sqlite
+      - ./data/uploads:/data/uploads
+    env_file:
+      - .env
+    restart: on-failure:3
+    networks: [app]
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: on-failure:3
+    networks: [app]
+
+networks:
+  app:
+    driver: bridge

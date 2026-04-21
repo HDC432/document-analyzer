@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Environment
+.env
+
+# Data (volumes — tracked via .gitkeep only)
+data/chroma/*
+data/sqlite/*
+data/uploads/*
+!data/chroma/.gitkeep
+!data/sqlite/.gitkeep
+!data/uploads/.gitkeep
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OS
+.DS_Store
