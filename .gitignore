@@ -24,5 +24,8 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 
+# Test fixtures (large PDFs — copy tencent_2025.pdf here manually)
+backend/tests/fixtures/*.pdf
+
 # OS
 .DS_Store

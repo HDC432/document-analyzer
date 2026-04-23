@@ -9,7 +9,9 @@ from typing import Generator
 
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.database import SessionLocal
+from app.services.pdf_processor import PDFProcessor
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -19,6 +21,14 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+def get_pdf_processor() -> PDFProcessor:
+    """Factory for PDFProcessor, configured from settings."""
+    return PDFProcessor(
+        chunk_size=settings.chunk_size,
+        chunk_overlap=settings.chunk_overlap,
+    )
 
 
 def get_chroma():
