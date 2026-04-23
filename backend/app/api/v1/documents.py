@@ -5,10 +5,12 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_pdf_processor
+from app.api.deps import get_chroma, get_db, get_embedding_service, get_pdf_processor
 from app.config import settings
 from app.db.models import Document
+from app.db.vector_store import ChromaStore
 from app.schemas.document import DocumentInfo, DocumentUploadResponse
+from app.services.embedding_service import EmbeddingService
 from app.services.pdf_processor import PDFProcessor
 
 logger = logging.getLogger(__name__)
@@ -23,11 +25,15 @@ async def upload_document(
     file: UploadFile,
     db: Session = Depends(get_db),
     processor: PDFProcessor = Depends(get_pdf_processor),
+    embedding_svc: EmbeddingService = Depends(get_embedding_service),
+    chroma: ChromaStore = Depends(get_chroma),
 ) -> DocumentUploadResponse:
     """
-    Receive a PDF, validate it, persist to disk, extract chunks via PDFProcessor,
-    and write a Document row to SQLite. Chunks are discarded here (Step 3 writes
-    them to Chroma).
+    Receive a PDF, validate it, persist to disk, extract and embed chunks,
+    write to Chroma, then write a Document row to SQLite.
+
+    Flow: validate → write disk → process → embed → Chroma → DB commit
+    Rollback: finally block cleans Chroma and disk file on any failure.
     """
     data = await file.read()
 
@@ -43,15 +49,27 @@ async def upload_document(
 
     doc_id = str(uuid4())
     saved_path: Path | None = None
+    chroma_written = False
     success = False
     try:
         saved_path = settings.uploads_path / f"{doc_id}.pdf"
         saved_path.write_bytes(data)
 
         page_count, chunks = processor.process(str(saved_path), doc_id=doc_id)
+
+        # Skip embed/Chroma if no chunks (blank PDF, image-only PDF).
+        # Document row is still created with chunk_count=0 so user sees the upload.
+        if chunks:
+            texts = [c.text for c in chunks]
+            embeddings = embedding_svc.embed_texts(texts)
+
+            # Flag before add so partial Chroma write is cleaned up on failure.
+            chroma_written = True
+            chroma.add(chunks, embeddings)
+
         logger.info(
-            "Processed %d chunks across %d pages for doc %s",
-            len(chunks), page_count, doc_id,
+            "Indexed doc %s: %d chunks across %d pages",
+            doc_id, len(chunks), page_count,
         )
 
         doc = Document(
@@ -75,8 +93,11 @@ async def upload_document(
         raise HTTPException(500, "Upload processing failed") from exc
 
     finally:
-        if not success and saved_path and saved_path.exists():
-            saved_path.unlink(missing_ok=True)
+        if not success:
+            if chroma_written:
+                chroma.delete_document(doc_id)
+            if saved_path and saved_path.exists():
+                saved_path.unlink(missing_ok=True)
 
 
 @router.get("/", response_model=list[DocumentInfo])

@@ -1,16 +1,18 @@
 """
 FastAPI dependency providers.
 
-get_db is ready for use. get_chroma and get_embedding_service are stubs
-filled in Steps 3 and 2 respectively — they raise NotImplementedError so
-any route that Depends on them will 500 until implemented.
+Returns configured service instances per request. See individual
+factory docstrings for construction details.
 """
 from typing import Generator
 
+from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.database import SessionLocal
+from app.db.vector_store import ChromaStore
+from app.services.embedding_service import EmbeddingService
 from app.services.pdf_processor import PDFProcessor
 
 
@@ -31,11 +33,14 @@ def get_pdf_processor() -> PDFProcessor:
     )
 
 
-def get_chroma():
-    """Yield a ChromaStore instance. Implemented in Step 3."""
-    raise NotImplementedError("Implemented in Step 3")
+def get_chroma() -> ChromaStore:
+    """Factory for ChromaStore, configured from settings."""
+    return ChromaStore(path=settings.chroma_path)
 
 
-def get_embedding_service():
-    """Yield an EmbeddingService instance. Implemented in Step 2."""
-    raise NotImplementedError("Implemented in Step 2")
+def get_embedding_service() -> EmbeddingService:
+    """Factory for EmbeddingService, configured from settings."""
+    return EmbeddingService(
+        openai_client=OpenAI(api_key=str(settings.openai_api_key)),
+        model=settings.embedding_model,
+    )
