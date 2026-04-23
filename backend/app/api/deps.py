@@ -6,6 +6,7 @@ factory docstrings for construction details.
 """
 from typing import Generator
 
+from fastapi import Depends
 from openai import OpenAI
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,7 @@ from app.db.database import SessionLocal
 from app.db.vector_store import ChromaStore
 from app.services.embedding_service import EmbeddingService
 from app.services.pdf_processor import PDFProcessor
+from app.services.retrieval_service import Retriever
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -43,4 +45,17 @@ def get_embedding_service() -> EmbeddingService:
     return EmbeddingService(
         openai_client=OpenAI(api_key=str(settings.openai_api_key)),
         model=settings.embedding_model,
+    )
+
+
+def get_retriever(
+    chroma: ChromaStore = Depends(get_chroma),
+    embedding_svc: EmbeddingService = Depends(get_embedding_service),
+) -> Retriever:
+    """Factory for Retriever. Composes ChromaStore + EmbeddingService + settings."""
+    return Retriever(
+        chroma_store=chroma,
+        embedding_service=embedding_svc,
+        top_k=settings.top_k,
+        distance_threshold=settings.distance_threshold,
     )

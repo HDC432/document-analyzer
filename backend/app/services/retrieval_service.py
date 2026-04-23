@@ -1,12 +1,30 @@
 """
-Retrieval service: embed query → Chroma top-k → distance filter → (rerank hook).
+Retrieval service: embed query → Chroma top-k → distance filter → rerank hook.
 
-Implemented in Step 4. Stub only.
+Pipeline:
+  1. embed_query()  — convert query string to a vector
+  2. chroma.query() — fetch top_k candidates for this document
+  3. to dataclass   — convert raw dicts to RetrievedChunk
+  4. threshold      — drop chunks where distance > distance_threshold (hard filter)
+  5. _rerank()      — soft re-ordering hook (identity in v1, real reranker in v2)
 
-_rerank is an identity function in v1. To add a reranker in v2, subclass
-Retriever and override _rerank — no other code needs to change.
+Distance threshold vs. _rerank separation:
+  The threshold removes clearly irrelevant candidates before _rerank sees them.
+  This means a v2 reranker only evaluates non-trivially-irrelevant chunks.
+
+Empty-list contract:
+  retrieve() returns [] when nothing clears the threshold.
+  Callers (chat_service) MUST short-circuit and return the refusal message
+  without calling the LLM — this is the primary anti-hallucination guard.
+
+_rerank extension path:
+  Subclass Retriever and override _rerank to plug in a cross-encoder or
+  other reranker. No other code needs to change.
 """
 from dataclasses import dataclass
+
+from app.db.vector_store import ChromaStore
+from app.services.embedding_service import EmbeddingService
 
 
 @dataclass
@@ -22,8 +40,8 @@ class Retriever:
 
     def __init__(
         self,
-        chroma_store,
-        embedding_service,
+        chroma_store: ChromaStore,
+        embedding_service: EmbeddingService,
         top_k: int,
         distance_threshold: float,
     ) -> None:
@@ -31,21 +49,44 @@ class Retriever:
         Args:
             chroma_store:       ChromaStore instance (injected).
             embedding_service:  EmbeddingService instance (injected).
-            top_k:              Max chunks to return; sourced from settings.top_k.
-            distance_threshold: Cutoff; sourced from settings.distance_threshold.
+            top_k:              Max candidates fetched from Chroma before filtering.
+            distance_threshold: Hard upper bound on cosine distance (default 0.45).
         """
-        raise NotImplementedError("Implemented in Step 4")
+        self.chroma_store = chroma_store
+        self.embedding_service = embedding_service
+        self.top_k = top_k
+        self.distance_threshold = distance_threshold
 
     def retrieve(self, doc_id: str, query: str) -> list[RetrievedChunk]:
-        """
-        Embed query, fetch top-k from Chroma, filter by distance threshold.
+        """Embed query, fetch top-k from Chroma, filter by distance threshold.
 
-        Returns an empty list when no chunk clears the threshold — the caller
-        (chat_service) must short-circuit and return the refusal message without
-        calling the LLM.
+        Steps:
+          1. Embed query string via embedding_service.embed_query().
+          2. Query ChromaStore for top_k candidates scoped to doc_id.
+          3. Convert each result dict to a RetrievedChunk dataclass.
+          4. Discard chunks with distance > distance_threshold.
+          5. Pass filtered list through _rerank() and return.
+
+        Returns:
+          Filtered, re-ranked list of RetrievedChunk. Empty list when nothing
+          clears the threshold — callers must short-circuit without calling LLM.
         """
-        raise NotImplementedError
+        query_embedding = self.embedding_service.embed_query(query)
+        raw = self.chroma_store.query(doc_id, query_embedding, top_k=self.top_k)
+
+        filtered = [
+            RetrievedChunk(
+                text=r["text"],
+                page_number=r["page_number"],
+                distance=r["distance"],
+                doc_id=r["doc_id"],
+            )
+            for r in raw
+            if r["distance"] <= self.distance_threshold
+        ]
+
+        return self._rerank(filtered)
 
     def _rerank(self, chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
-        """v1: identity. v2: replace with a real reranker."""
+        """v1: identity. v2: override with a real reranker."""
         return chunks
